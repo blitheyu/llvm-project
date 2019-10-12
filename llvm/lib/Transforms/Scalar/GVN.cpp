@@ -87,18 +87,21 @@ using namespace PatternMatch;
 
 #define DEBUG_TYPE "gvn"
 
-STATISTIC(NumGVNInstr,  "Number of instructions deleted");
+STATISTIC(NumGVNInstr,  "Number of instructions deleted by GVN");
 STATISTIC(NumGVNLoad,   "Number of loads deleted");
 STATISTIC(NumGVNPRE,    "Number of instructions PRE'd");
 STATISTIC(NumGVNBlocks, "Number of blocks merged");
 STATISTIC(NumGVNSimpl,  "Number of instructions simplified");
 STATISTIC(NumGVNEqProp, "Number of equalities propagated");
 STATISTIC(NumPRELoad,   "Number of loads PRE'd");
+STATISTIC(NumLVN,  "Number of instructions deleted by LVN");
+STATISTIC(NumSVN,  "Number of instructions deleted by SVN");
 
-static cl::opt<bool> EnablePRE("enable-pre",
-                               cl::init(true), cl::Hidden);
-static cl::opt<bool> EnableLoadPRE("enable-load-pre", cl::init(true));
+static cl::opt<bool> EnablePRE("enable-pre", cl::init(false), cl::Hidden);
+static cl::opt<bool> EnableLoadPRE("enable-load-pre", cl::init(false));
 static cl::opt<bool> EnableMemDep("enable-gvn-memdep", cl::init(true));
+static cl::opt<bool> EnableSVN("svn", cl::init(false));
+static cl::opt<bool> EnableLVN("lvn", cl::init(false));
 
 // Maximum allowed recursion depth.
 static cl::opt<uint32_t>
@@ -142,7 +145,7 @@ template <> struct DenseMapInfo<GVN::Expression> {
   static inline GVN::Expression getEmptyKey() { return ~0U; }
   static inline GVN::Expression getTombstoneKey() { return ~1U; }
 
-  static unsigned getHashValue(const GVN::Expression &e) {
+  static unsigned getHashValue(const GVN::Expression &e) { //////////////////
     using llvm::hash_value;
 
     return static_cast<unsigned>(hash_value(e));
@@ -1374,7 +1377,8 @@ bool GVN::processNonLocalLoad(LoadInst *LI) {
     return true;
   }
 
-  // Step 4: Eliminate partial redundancy.
+  // Step 4: Eliminate partial redundancy.  
+  //-------PRE: partial redundancy elimination-------//
   if (!EnablePRE || !EnableLoadPRE)
     return false;
 
@@ -1599,6 +1603,15 @@ void GVN::ValueTable::eraseTranslateCacheEntry(uint32_t Num,
       PhiTranslateTable.erase(FindRes);
   }
 }
+// return true if A is an ancestor of B in an EBB
+bool GVN::is_ancestor(const BasicBlock *A, const BasicBlock *B) { 
+  if(A == B)
+    return true;
+  if(B->hasNPredecessorsOrMore(2) || B->hasNPredecessors(0))
+    return false;
+  const BasicBlock *C = B->getSinglePredecessor();
+  return is_ancestor(A, C);
+  }
 
 // In order to find a leader for a given value number at a
 // specific basic block, we first obtain the list of all Values for that number,
@@ -1606,10 +1619,79 @@ void GVN::ValueTable::eraseTranslateCacheEntry(uint32_t Num,
 // question.  This is fast because dominator tree queries consist of only
 // a few comparisons of DFS numbers.
 Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
-  LeaderTableEntry Vals = LeaderTable[num];
+  LeaderTableEntry Vals = LeaderTable[num]; // Vals is the first instruction where such value num showed in function CFG in RPOT
   if (!Vals.Val) return nullptr;
 
   Value *Val = nullptr;
+
+  //LLVM_DEBUG(dbgs() << "findLeader： BB: " << *BB->getName() << '\n');
+
+  bool GSL = true; // GVN / SVN / LVN flag
+  if(EnableLVN)//if it is a lvn pass, only consider bb that dominates itself
+    GSL = (Vals.BB == BB);
+  if(EnableSVN)
+    GSL = is_ancestor(Vals.BB, BB);
+
+
+  if (DT->dominates(Vals.BB, BB) && GSL) {// case that bb of first instruction of such value num happens to be the bb we are examing
+    Val = Vals.Val;
+    LLVM_DEBUG(dbgs() << "findLeader(head) Val:\n" << Val);
+    if (isa<Constant>(Val)) return Val;// if such instruction value is a constant, return immediately
+  }
+
+  LeaderTableEntry* Next = Vals.Next;
+  while (Next) {                      // iterate through all instructions with such value number
+    if (DT->dominates(Next->BB, BB) && GSL) {// find constant value, return immediately
+      LLVM_DEBUG(dbgs() << "findLeader(list) Val:\n" << Val);
+      if (isa<Constant>(Next->Val)) return Next->Val;// value is not constant, save instruction value to Val
+      if (!Val) Val = Next->Val;
+    }
+    Next = Next->Next;
+  }
+  return Val;
+
+
+  
+
+ /*  if(EnableLVN) { 
+    if(DT->dominates(Vals.BB, BB) && Vals.BB == BB) {
+      Val = Vals.Val;
+      
+      if (isa<Constant>(Val)) return Val;
+    }
+
+    LeaderTableEntry* Next = Vals.Next;
+    while (Next) { 
+      if (DT->dominates(Next->BB, BB) && Vals.BB == BB) {
+        if (isa<Constant>(Next->Val)) return Next->Val; 
+        if (!Val) Val = Next->Val; 
+      }
+
+      Next = Next->Next;
+    }
+    return Val;
+  }
+
+  if(EnableSVN){
+    if (DT->dominates(Vals.BB, BB) && is_ancestor(Vals.BB, BB)) {
+    Val = Vals.Val;
+    if (isa<Constant>(Val)) return Val;
+    }
+
+    LeaderTableEntry* Next = Vals.Next;
+    while (Next) {
+      if (DT->dominates(Next->BB, BB) && is_ancestor(Vals.BB, BB)) {
+        if (isa<Constant>(Next->Val)) return Next->Val;
+        if (!Val) Val = Next->Val;
+      }
+
+      Next = Next->Next;
+  }
+  return Val;
+  }
+
+
+
   if (DT->dominates(Vals.BB, BB)) {
     Val = Vals.Val;
     if (isa<Constant>(Val)) return Val;
@@ -1625,7 +1707,8 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
     Next = Next->Next;
   }
 
-  return Val;
+  return Val; */
+
 }
 
 /// There is an edge from 'Src' to 'Dst'.  Return
@@ -1884,7 +1967,7 @@ bool GVN::processInstruction(Instruction *I) {
 
   // For conditional branches, we can perform simple conditional propagation on
   // the condition value itself.
-  if (BranchInst *BI = dyn_cast<BranchInst>(I)) {
+  if (BranchInst *BI = dyn_cast<BranchInst>(I)) {///////////////////////////////////////////////
     if (!BI->isConditional())
       return false;
 
@@ -1972,10 +2055,10 @@ bool GVN::processInstruction(Instruction *I) {
   }
 
   // Remove it!
-  patchAndReplaceAllUsesWith(I, Repl);
+  patchAndReplaceAllUsesWith(I, Repl);///////////////////////////////////////////
   if (MD && Repl->getType()->isPtrOrPtrVectorTy())
     MD->invalidateCachedPointerInfo(Repl);
-  markInstructionForDeletion(I);
+  markInstructionForDeletion(I);////////////////////////////////////////////////
   return true;
 }
 
@@ -2068,7 +2151,18 @@ bool GVN::processBlock(BasicBlock *BB) {
     }
 
     // If we need some instructions deleted, do it now.
+
+  if(EnableLVN){
+    NumLVN += InstrsToErase.size();
+  }
+  else if(EnableSVN){
+    NumSVN += InstrsToErase.size();
+  }
+  else {
     NumGVNInstr += InstrsToErase.size();
+  }
+    
+  //NumGVNInstr += InstrsToErase.size();
 
     // Avoid iterator invalidation.
     bool AtStart = BI == BB->begin();
@@ -2310,8 +2404,18 @@ bool GVN::performScalarPRE(Instruction *CurInst) {
   // some assertion failures.
   ICF->removeInstruction(CurInst);
   CurInst->eraseFromParent();
-  ++NumGVNInstr;
 
+  if(EnableLVN){
+    ++NumLVN;
+  }
+  else if(EnableSVN){
+    ++NumSVN;
+  }
+  else{
+    ++NumGVNInstr;
+  }
+
+  //++NumGVNInstr;
   return true;
 }
 
@@ -2555,7 +2659,7 @@ public:
 
     return Impl.runImpl(
         F, getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F),
-        getAnalysis<DominatorTreeWrapperPass>().getDomTree(),
+        getAnalysis<DominatorTreeWrapperPass>().getDomTree(),///////////////////////
         getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(),
         getAnalysis<AAResultsWrapperPass>().getAAResults(),
         NoMemDepAnalysis ? nullptr
