@@ -1,8 +1,9 @@
 //===- GVN.h - Eliminate redundant values and loads -------------*- C++ -*-===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -120,8 +121,6 @@ public:
     uint32_t lookupOrAddCall(CallInst *C);
     uint32_t phiTranslateImpl(const BasicBlock *BB, const BasicBlock *PhiBlock,
                               uint32_t Num, GVN &Gvn);
-    bool areCallValsEqual(uint32_t Num, uint32_t NewNum, const BasicBlock *Pred,
-                          const BasicBlock *PhiBlock, GVN &Gvn);
     std::pair<uint32_t, bool> assignExpNewValueNum(Expression &exp);
     bool areAllValsInBB(uint32_t num, const BasicBlock *BB, GVN &Gvn);
 
@@ -161,7 +160,6 @@ private:
   SetVector<BasicBlock *> DeadBlocks;
   OptimizationRemarkEmitter *ORE;
   ImplicitControlFlowTracking *ICF;
-  LoopInfo *LI;
 
   ValueTable VN;
 
@@ -178,7 +176,7 @@ private:
   // Block-local map of equivalent values to their leader, does not
   // propagate to any successors. Entries added mid-block are applied
   // to the remaining instructions in the block.
-  SmallMapVector<Value *, Value *, 4> ReplaceOperandsWithMap;
+  SmallMapVector<Value *, Constant *, 4> ReplaceWithConstMap;
   SmallVector<Instruction *, 8> InstrsToErase;
 
   // Map the block to reversed postorder traversal number. It is used to
@@ -277,13 +275,15 @@ private:
   bool performScalarPRE(Instruction *I);
   bool performScalarPREInsertion(Instruction *Instr, BasicBlock *Pred,
                                  BasicBlock *Curr, unsigned int ValNo);
+
+  bool is_ancestor(const BasicBlock *A, const BasicBlock *B);
   Value *findLeader(const BasicBlock *BB, uint32_t num);
   void cleanupGlobalSets();
   void fillImplicitControlFlowInfo(BasicBlock *BB);
   void verifyRemoved(const Instruction *I) const;
   bool splitCriticalEdges();
   BasicBlock *splitCriticalEdges(BasicBlock *Pred, BasicBlock *Succ);
-  bool replaceOperandsForInBlockEquality(Instruction *I) const;
+  bool replaceOperandsWithConsts(Instruction *I) const;
   bool propagateEquality(Value *LHS, Value *RHS, const BasicBlockEdge &Root,
                          bool DominatesByEdge);
   bool processFoldableCondBr(BranchInst *BI);
