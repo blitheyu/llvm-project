@@ -1604,7 +1604,7 @@ void GVN::ValueTable::eraseTranslateCacheEntry(uint32_t Num,
   }
 }
 // return true if A is an ancestor of B in an EBB
-bool GVN::is_ancestor(const BasicBlock *A, const BasicBlock *B) { 
+bool is_ancestor(const BasicBlock *A, const BasicBlock *B) { 
   if(A == B)
     return true;
   if(B->hasNPredecessorsOrMore(2) || B->hasNPredecessors(0))
