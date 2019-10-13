@@ -1668,7 +1668,7 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
 
   }
 
-  else (!EnableSVN && !EnableLVN) {
+  else {
     Value *Val = nullptr;
     if (DT->dominates(Vals.BB, BB)) {
       Val = Vals.Val;
