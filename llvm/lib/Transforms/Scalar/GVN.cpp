@@ -1698,6 +1698,7 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
 
     return Val;
   }
+  
 }
 
 /// There is an edge from 'Src' to 'Dst'.  Return
