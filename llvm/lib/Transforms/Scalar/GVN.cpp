@@ -1631,8 +1631,10 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
   if (!Vals.Val)
     return nullptr;
 
+  Value *Val = nullptr;
+
   if (Enablelvn) {
-    Value *Val = nullptr;
+    
     if ((DT->dominates(Vals.BB, BB)) && (Vals.BB == BB)) {
       Val = Vals.Val;
       if (isa<Constant>(Val))
@@ -1641,7 +1643,7 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
 
     LeaderTableEntry *Next = Vals.Next;
     while (Next) {
-      if ((DT->dominates(Vals.BB, BB)) && (Vals.BB == BB)) {
+      if ((DT->dominates(Next->BB, BB)) && (Next->BB == BB)) {
         if (isa<Constant>(Next->Val))
           return Next->Val;
         if (!Val)
@@ -1654,7 +1656,7 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
   }
 
   else if (Enablesvn) {
-    Value *Val = nullptr;
+    
     if ((DT->dominates(Vals.BB, BB)) && is_ancestor(Vals.BB, BB)) {
       Val = Vals.Val;
       if (isa<Constant>(Val))
@@ -1663,7 +1665,7 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
 
     LeaderTableEntry *Next = Vals.Next;
     while (Next) {
-      if ((DT->dominates(Vals.BB, BB)) && is_ancestor(Vals.BB, BB)) {
+      if ((DT->dominates(Next->BB, BB)) && is_ancestor(Next->BB, BB)) {
         if (isa<Constant>(Next->Val))
           return Next->Val;
         if (!Val)
@@ -1698,7 +1700,7 @@ Value *GVN::findLeader(const BasicBlock *BB, uint32_t num) {
 
     return Val;
   }
-  
+
 }
 
 /// There is an edge from 'Src' to 'Dst'.  Return
